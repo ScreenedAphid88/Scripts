@@ -1,3 +1,21 @@
+# Check if Active Directory module is available
+$adModuleInstalled = Get-Module -ListAvailable -Name ActiveDirectory -ErrorAction SilentlyContinue
+
+if (-not $adModuleInstalled) {
+    Write-Host "Active Directory module not found. Do you want to install it? (Y/N)"
+    $installChoice = Read-Host
+
+    if ($installChoice -eq 'Y' -or $installChoice -eq 'y') {
+        Write-Host "Installing Active Directory module..."
+        Install-Module -Name ActiveDirectory -Force -Scope CurrentUser
+        Import-Module ActiveDirectory
+        Write-Host "Active Directory module installed successfully."
+    } else {
+        Write-Host "Active Directory module is required. Exiting script."
+        Exit
+    }
+}
+
 # Set the threshold for last logon (in days)
 $thresholdDays = 90
 
@@ -13,7 +31,43 @@ $inactiveUsers = Get-ADUser -Filter {LastLogonDate -lt $thresholdDate} -Properti
 # Display the results
 foreach ($user in $inactiveUsers) {
     Write-Host "User: $($user.SamAccountName)"
-    Write-Host "Last Logon Date: $($user.LastLogonDate)"
+    Write-Host "Last Logon Date: $($user.LastLogonDate)"# Set the threshold for last logon (in days)
+    $thresholdDays = 90
+    
+    # Get the current date
+    $currentDate = Get-Date
+    
+    # Calculate the threshold date
+    $thresholdDate = $currentDate.AddDays(-$thresholdDays)
+    
+    # Get all domain controllers in the current domain
+    $domainControllers = Get-ADDomainController -Filter *
+    
+    # Initialize an array to store the results
+    $inactiveUsers = @()
+    
+    # Loop through each domain controller
+    foreach ($dc in $domainControllers) {
+        # Get users from each domain controller and filter based on last logon date
+        $usersOnDC = Get-ADUser -Filter {LastLogonDate -lt $thresholdDate} -Properties LastLogonDate -Server $dc.Name | Where-Object { $_.Enabled -eq $true }
+    
+        # Add the users to the results array
+        $inactiveUsers += $usersOnDC
+    }
+    
+    # Display the results
+    foreach ($user in $inactiveUsers) {
+        Write-Host "User: $($user.SamAccountName)"
+        Write-Host "Last Logon Date: $($user.LastLogonDate)"
+        Write-Host "----------------------"
+    }
+    
+    # Optional: Export the results to a CSV file
+    $exportPath = "C:\Path\To\Export\InactiveUsers.csv"
+    $inactiveUsers | Select-Object SamAccountName, LastLogonDate | Export-Csv -Path $exportPath -NoTypeInformation
+    
+    Write-Host "Script completed. Results exported to: $exportPath"
+    
     Write-Host "----------------------"
 }
 
