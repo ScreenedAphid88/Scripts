@@ -1,0 +1,24 @@
+# Set the threshold for last logon (in days)
+$thresholdDays = 90
+
+# Get the current date
+$currentDate = Get-Date
+
+# Calculate the threshold date
+$thresholdDate = $currentDate.AddDays(-$thresholdDays)
+
+# Get all users from Active Directory and filter based on last logon date
+$inactiveUsers = Get-ADUser -Filter {LastLogonDate -lt $thresholdDate} -Properties LastLogonDate | Where-Object { $_.Enabled -eq $true }
+
+# Display the results
+foreach ($user in $inactiveUsers) {
+    Write-Host "User: $($user.SamAccountName)"
+    Write-Host "Last Logon Date: $($user.LastLogonDate)"
+    Write-Host "----------------------"
+}
+
+# Optional: Export the results to a CSV file
+$exportPath = "C:\Path\To\Export\InactiveUsers.csv"
+$inactiveUsers | Select-Object SamAccountName, LastLogonDate | Export-Csv -Path $exportPath -NoTypeInformation
+
+Write-Host "Script completed. Results exported to: $exportPath"
