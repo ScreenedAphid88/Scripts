@@ -1,6 +1,9 @@
 <#  This script will search through your current domain for all unlinked GPOs,
-    export a HTML report of all the policies found, 
-# 
+    export a HTML report of all the policies found, and backup the GPOs.
+
+    Uncomment link 25 if you want the script to automatically remove the unlinked GPOs after
+    the HTML and report and backup have been saved.
+#>
 
 Import-Module GroupPolicy
  $Date = Get-Date -Format dd_MM_yyyy
