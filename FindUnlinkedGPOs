@@ -1,0 +1,23 @@
+<#  This script will search through your current domain for all unlinked GPOs,
+    export a HTML report of all the policies found, 
+# 
+
+Import-Module GroupPolicy
+ $Date = Get-Date -Format dd_MM_yyyy
+ $BackupFolder = Read-Host "Provide a directory to store the backup files (eg, c:\temp\GPOBackups)  "
+
+# Get all GPOs with the gpo report type as XML and also look for the section  in the xml report.
+ Get-GPO -All | Where-Object { $_ | Get-GPOReport -ReportType XML | Select-String -NotMatch "<LinksTo>" } ForEach-Object {
+
+   # Backup the GPO to the BackupFolder
+   Backup-GPO -Name $_.DisplayName -Path $Backupfolder
+
+   # Saves HTML report of GPO to BackupFolder
+   Get-GPOReport -Name $_.DisplayName -ReportType Html -Path "$BackupFolder\$($_.DisplayName).html"
+   
+   # Create UnlinkedGPOs.txt file in the backup folder that contains list of all unlinked GPOs
+   $_ | Select-Object * | Out-File "$BackupFolder\UnLinkedGPOs.txt" -Append
+
+   # Remove the GPO but first prompt before removing
+   #$_.Displayname | Remove-GPO -Confirm
+ }
