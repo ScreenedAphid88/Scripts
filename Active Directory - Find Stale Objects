@@ -1,0 +1,14 @@
+# Import the Active Directory module
+Import-Module ActiveDirectory
+
+# Get all disabled users and export to CSV
+Get-ADUser -Filter 'Enabled -eq $False' -Properties Name, UserPrincipalName, Manager, Enabled | Export-Csv -Path C:\Temp\DisabledUsers.csv -NoTypeInformation
+
+# Get all users who are required to change their password at next logon
+$NoPassSet = Get-ADUser -Properties PasswordLastSet -Filter "PasswordLastSet -eq '0'"
+
+Foreach ($user in $NoPassSet)    
+    {
+    Get-ADUser $user.SamAccountName -properties Name, UserPrincipalName, PasswordNeverExpires, Description, Manager, whenCreated | Select-Object Name, UserPrincipalName, PasswordNeverExpires, Description, @{Name='Manager'; Expression={(Get-ADUser $_.Manager).Name}}, whenCreated | export-csv c:\temp\PasswordNotSet.csv -NoTypeInformation -Append
+    }
+Write-host $NoPassSet.count "user accounts without passwords have been written to c:\temp\PasswordNotSet.csv"
