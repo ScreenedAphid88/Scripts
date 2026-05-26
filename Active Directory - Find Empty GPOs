@@ -1,0 +1,82 @@
+# Find Empty Group Policy Objects and Export to CSV
+# This script identifies GPOs that contain no policy settings by exporting them to XML and checking for content
+
+param(
+    [string]$OutputPath = "c:\temp\EmptyGPOs_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv",
+    [string]$TempBackupPath = "c:\temp\GPOBackups"
+)
+
+# Import required modules
+Import-Module GroupPolicy -ErrorAction Stop
+
+try {
+    # Create temp backup directory if it doesn't exist
+    if (-not (Test-Path $TempBackupPath)) {
+        New-Item -ItemType Directory -Path $TempBackupPath -Force | Out-Null
+    }
+    
+    # Get all GPOs
+    Write-Host "Retrieving all Group Policy Objects..." -ForegroundColor Yellow
+    $AllGPOs = Get-GPO -All -ErrorAction Stop
+
+    # Identify empty GPOs
+    Write-Host "Checking GPO contents..." -ForegroundColor Yellow
+    $EmptyGPOs = @()
+    
+    foreach ($GPO in $AllGPOs) {
+        try {
+            $backupPath = Join-Path $TempBackupPath $GPO.Id.ToString()
+            
+            # Backup GPO to XML
+            Backup-GPO -Guid $GPO.Id -Path $TempBackupPath -ErrorAction SilentlyContinue | Out-Null
+            
+            # Check if backup exists and examine the manifest.xml
+            $manifestPath = Join-Path $backupPath "{$($GPO.Id)}\Manifest.xml"
+            
+            if (Test-Path $manifestPath) {
+                [xml]$manifest = Get-Content $manifestPath -ErrorAction SilentlyContinue
+                
+                # Check if there are any policy settings defined in the manifest
+                # An empty GPO will have no User or Computer policy extensions
+                $hasPolicies = $false
+                
+                if ($manifest.DocumentElement) {
+                    # Look for any extension data that indicates policies are configured
+                    $extensions = $manifest.DocumentElement.Extensions.Extension
+                    if ($extensions -and $extensions.Count -gt 0) {
+                        $hasPolicies = $true
+                    }
+                }
+                
+                if (-not $hasPolicies) {
+                    $EmptyGPOs += [PSCustomObject]@{
+                        'GPO Name' = $GPO.DisplayName
+                        'Created' = $GPO.CreationTime
+                        'GUID' = $GPO.Id.ToString()
+                    }
+                }
+            }
+        }
+        catch {
+            # Continue processing other GPOs on error
+        }
+    }
+    
+    # Clean up temp backup files
+    Write-Host "Cleaning up temporary files..." -ForegroundColor Yellow
+    Remove-Item -Path $TempBackupPath -Recurse -Force -ErrorAction SilentlyContinue
+
+    # Export to CSV
+    if ($EmptyGPOs.Count -gt 0) {
+        $EmptyGPOs | Export-Csv -Path $OutputPath -NoTypeInformation -Force
+        Write-Host "✓ Found $($EmptyGPOs.Count) empty GPO(s)" -ForegroundColor Green
+        Write-Host "✓ Results exported to: $OutputPath" -ForegroundColor Green
+    }
+    else {
+        Write-Host "✓ No empty GPOs found" -ForegroundColor Green
+    }
+}
+catch {
+    Write-Host "✗ Error: $_" -ForegroundColor Red
+    #exit 1
+}
