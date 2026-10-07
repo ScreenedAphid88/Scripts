@@ -30,7 +30,6 @@ certificate checks to make a failed query work.
 | `ThrottleLimit` | `4` | Maximum simultaneous collection jobs, configurable from 1 to 16. Jobs are process-isolated for reliable cancellation and Windows PowerShell 5.1 compatibility. Startup overhead may outweigh parallelism gains for small environments. |
 | `OperationTimeoutSeconds` | `60` | Per-job wall-clock deadline, including startup; inventory is one job and user count and each DC health/disk check are separate jobs. Increase this for large or slow directories. |
 | `DiagnosticsTimeoutSeconds` | `300` | Deadline for each native diagnostic process. |
-| `UserCountMethod` | `LDAP` | Paged, signed/sealed LDAP subtree search requesting only `objectGUID`, with referral chasing disabled to stay within the selected domain; `AD` streams `Get-ADUser` results through `Measure-Object`. Neither counts users in other domains. |
 | `IncludeDiagnosticDetails` | Off | Include complete native output and detailed collection errors. DCDIAG `/q` output is retained without language-dependent filtering. |
 | `IncludeCreatorIdentity` | Off | Include the generating user and workstation in the report. |
 | `RedactSensitiveData` | Off | Mask known internal domain/server names, sites, creator identity, and IPv4 addresses in rendered text. Best-effort only: unexpected names or other identifiers in raw diagnostics may remain. Review before sharing. |
@@ -47,26 +46,24 @@ non-GC controllers are excluded from the GC-readiness denominator. Repadmin's
 exit code indicates command completion, not independently verified replication
 health. Request diagnostic details when investigating its results.
 
+User counting exclusively streams `Get-ADUser` results through `Measure-Object`,
+using the selected controller and a subtree search under the selected domain's
+distinguished name, without a result-count limit. The script no longer uses
+direct `DirectoryEntry`/`DirectorySearcher` LDAP queries. The `UserCountMethod`
+parameter has been removed; omit it from existing commands. Query failures
+remain explicit and are not returned as zero users. Increase
+`OperationTimeoutSeconds` if a large directory needs more collection time.
+
 RootDSE health flags are unwrapped from AD property collections before Boolean
 conversion. Missing, multi-valued, or invalid flags fail the health check rather
-than being treated as healthy. LDAP resources are disposed through `psbase`
-to avoid directory lookups during PowerShell member resolution.
-LDAP uses the path-only `DirectoryEntry` constructor and then sets authentication
-flags through `psbase`, preserving default Windows credentials. Passing
-PowerShell `$null` to the constructor's username/password string arguments
-converts them to empty credentials and can cause an unauthenticated-bind error.
+than being treated as healthy.
 
 If DCDIAG reaches its deadline, use `-DiagnosticsLevel Quick` for the selected
 controller's connectivity, advertising, and replication tests, or increase
 `-DiagnosticsTimeoutSeconds` (for example, `900`) to retain full enterprise-wide
 coverage. The maximum is `7200` seconds. A timeout remains an unavailable check,
-not a healthy result. If LDAP user counting still reports an operations error,
-use `-UserCountMethod AD` and review the detailed warning; this explicitly selects
-the AD cmdlet path rather than silently falling back after an LDAP failure.
-LDAP failures include the target server and search base, plus the HRESULT and
-extended LDAP error when available. Disabling referrals avoids failures while
-following references outside the selected domain; it does not resolve all
-authentication, connectivity, or directory-service errors.
+not a healthy result. Use `-IncludeDiagnosticDetails` to retain native diagnostic
+output and detailed collection warnings in the report.
 
 Reports are first written to a temporary sibling file and then moved into place.
 Native tools are invoked from their Windows system location, not command lookup.

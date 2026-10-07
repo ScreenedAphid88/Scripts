@@ -37,8 +37,6 @@ param(
     [int]$DiagnosticsTimeoutSeconds = 300,
     [ValidateSet("None", "Quick", "Full")]
     [string]$DiagnosticsLevel = "Full",
-    [ValidateSet("LDAP", "AD")]
-    [string]$UserCountMethod = "LDAP",
     [switch]$RedactSensitiveData,
     [switch]$IncludeDiagnosticDetails,
     [switch]$IncludeCreatorIdentity,
@@ -264,7 +262,7 @@ if (-not (Test-Path -LiteralPath $outputDirectory -PathType Container)) {
 $collectionWorker = {
     param($Task, $TimeoutSeconds)
     $ErrorActionPreference = "Stop"
-    if ($Task.Kind -in @("Inventory", "Status") -or ($Task.Kind -eq "Users" -and $Task.Method -eq "AD")) {
+    if ($Task.Kind -in @("Inventory", "Status", "Users")) {
         Import-Module ActiveDirectory -ErrorAction Stop
     }
     switch ($Task.Kind) {
@@ -288,50 +286,8 @@ $collectionWorker = {
             }
         }
         "Users" {
-            if ($Task.Method -eq "AD") {
-                (Get-ADUser -Filter * -SearchBase $Task.SearchBase -Server $Task.Server -ResultSetSize $null -ErrorAction Stop |
-                    Measure-Object).Count
-            }
-            else {
-                if ($Task.Server -match '[\\/\s"]') { throw "Invalid server name for the LDAP user-count query." }
-                $entry = $null
-                $searcher = $null
-                $results = $null
-                try {
-                    $authentication = [System.DirectoryServices.AuthenticationTypes]::Secure -bor
-                        [System.DirectoryServices.AuthenticationTypes]::Signing -bor
-                        [System.DirectoryServices.AuthenticationTypes]::Sealing
-                    # The credential overload converts PowerShell $null strings to empty credentials.
-                    $entry = [System.DirectoryServices.DirectoryEntry]::new("LDAP://$($Task.Server)/$($Task.SearchBase)")
-                    $entry.psbase.AuthenticationType = $authentication
-                    $searcher = [System.DirectoryServices.DirectorySearcher]::new($entry)
-                    $searcher.Filter = "(&(objectCategory=person)(objectClass=user))"
-                    $searcher.SearchScope = [System.DirectoryServices.SearchScope]::Subtree
-                    $searcher.ReferralChasing = [System.DirectoryServices.ReferralChasingOption]::None
-                    $searcher.PageSize = 1000
-                    $searcher.ClientTimeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
-                    $searcher.ServerTimeLimit = [TimeSpan]::FromSeconds($TimeoutSeconds)
-                    $searcher.PropertiesToLoad.Add("objectGUID") | Out-Null
-                    $results = $searcher.FindAll()
-                    $results.Count
-                }
-                catch {
-                    $cause = $_.Exception.GetBaseException()
-                    $details = $cause.Message
-                    if ($cause -is [System.DirectoryServices.DirectoryServicesCOMException]) {
-                        $details += " HRESULT=$($cause.ErrorCode); LDAP extended error=$($cause.ExtendedError): $($cause.ExtendedErrorMessage)"
-                    }
-                    throw [System.InvalidOperationException]::new(
-                        "LDAP user count failed on $($Task.Server), search base $($Task.SearchBase). $details Use -UserCountMethod AD to explicitly select the AD cmdlet path.",
-                        $cause)
-                }
-                finally {
-                    # Bypass the directory-object adapter, which can bind to LDAP during member lookup.
-                    if ($null -ne $results) { $results.psbase.Dispose() }
-                    if ($null -ne $searcher) { $searcher.psbase.Dispose() }
-                    if ($null -ne $entry) { $entry.psbase.Dispose() }
-                }
-            }
+            (Get-ADUser -Filter * -SearchBase $Task.SearchBase -SearchScope Subtree -Server $Task.Server -ResultSetSize $null -ErrorAction Stop |
+                Measure-Object).Count
         }
         "Status" {
             $root = Get-ADRootDSE -Properties currentTime, isGlobalCatalogReady, isSynchronized -Server $Task.Server -ErrorAction Stop
@@ -395,7 +351,7 @@ $redactionValues = @(
     foreach ($dc in $domainControllers) { $dc.HostName; $dc.Name; $dc.IPv4Address; $dc.Site }
 ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique | Sort-Object { $_.Length } -Descending
 
-$userTask = [pscustomobject]@{ Kind = "Users"; Name = "User count"; Method = $UserCountMethod; SearchBase = $domainInfo.DistinguishedName; Server = $targetServer }
+$userTask = [pscustomobject]@{ Kind = "Users"; Name = "User count"; SearchBase = $domainInfo.DistinguishedName; Server = $targetServer }
 $tasks = @(
     $userTask
     foreach ($dc in $domainControllers) {

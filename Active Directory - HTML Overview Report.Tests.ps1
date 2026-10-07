@@ -54,8 +54,13 @@ function Invoke-WorkerChecks {
         @()
     }
     function Get-ADUser {
-        param($Filter, $SearchBase, $Server, $ResultSetSize, $ErrorAction)
-        1..7 | ForEach-Object { [pscustomobject]@{ Name = "user$_" } }
+        param($Filter, $SearchBase, $SearchScope, $Server, $ResultSetSize, $ErrorAction)
+        Assert-Report ($Filter -eq "*" -and $SearchBase -eq "DC=fixture" -and $SearchScope -eq "Subtree" -and $Server -eq "fixture") "User count targets all users in the selected domain and server."
+        Assert-Report ($null -eq $ResultSetSize -and $ErrorAction -eq "Stop") "User count is unlimited and query errors terminate the check."
+        if ($script:userQueryFails) { throw "Fixture AD user query failed." }
+        for ($index = 0; $index -lt $script:userFixtureCount; $index++) {
+            [pscustomobject]@{ Name = "user$index" }
+        }
     }
     function New-CimSessionOption { param($Protocol); [pscustomobject]@{ Protocol = $Protocol } }
     function New-CimSession {
@@ -93,55 +98,19 @@ function Invoke-WorkerChecks {
         catch { $failed = $true }
         Assert-Report $failed "Missing, multiple, and invalid RootDSE Boolean values fail explicitly."
     }
-    $ldapTry = $assignment.Find({
-        param($node)
-        $node -is [System.Management.Automation.Language.TryStatementAst] -and $node.Body.Extent.Text -match '\$searcher.FindAll\(\)'
-    }, $true)
-    $cleanupText = $ldapTry.Finally.Extent.Text
-    $cleanup = [scriptblock]::Create($cleanupText.Substring(1, $cleanupText.Length - 2))
-    $Task = [pscustomobject]@{ Server = "fixture"; SearchBase = "DC=fixture" }
-    $connectionSettings = $ldapTry.Body.FindAll({
-        param($node)
-        $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
-            $node.Left.Extent.Text -in @('$authentication', '$entry', '$entry.psbase.AuthenticationType')
-    }, $true)
-    . ([scriptblock]::Create(($connectionSettings | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine))
-    Assert-Report ($null -eq $entry.psbase.Username) "LDAP uses default Windows credentials, not an empty username coerced from PowerShell null."
-    $expectedAuthentication = [System.DirectoryServices.AuthenticationTypes]::Secure -bor
-        [System.DirectoryServices.AuthenticationTypes]::Signing -bor
-        [System.DirectoryServices.AuthenticationTypes]::Sealing
-    Assert-Report ($entry.psbase.AuthenticationType -eq $expectedAuthentication) "Default-credential LDAP connections retain secure authentication, signing, and sealing."
-    $entry.psbase.Path = "InvalidProvider://fixture"
-    $searcher = [System.DirectoryServices.DirectorySearcher]::new($entry)
-    $results = $null
-    $settings = $ldapTry.Body.FindAll({
-        param($node)
-        $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
-            $node.Left.Extent.Text -match '^\$searcher\.(Filter|SearchScope|ReferralChasing|PageSize|ClientTimeout|ServerTimeLimit)$'
-    }, $true)
-    $TimeoutSeconds = 10
-    & ([scriptblock]::Create(($settings | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine))
-    Assert-Report ($searcher.SearchScope -eq [System.DirectoryServices.SearchScope]::Subtree) "LDAP counting searches the entire selected domain subtree."
-    Assert-Report ($searcher.ReferralChasing -eq [System.DirectoryServices.ReferralChasingOption]::None) "Domain-scoped LDAP counting does not chase referrals."
-    Assert-Report ($searcher.PageSize -eq 1000 -and $searcher.Filter -eq "(&(objectCategory=person)(objectClass=user))") "LDAP counting retains paging and the user-only filter."
-    & $cleanup
-    Assert-Report $true "LDAP cleanup disposes unbound directory objects without invoking the directory-object adapter."
-    $Task = [pscustomobject]@{ Server = "fixture"; SearchBase = "DC=fixture" }
-    $catchText = $ldapTry.CatchClauses[0].Body.Extent.Text
-    $ldapException = [System.DirectoryServices.DirectoryServicesCOMException]::new("Fixture operations error.")
-    $failureTest = [scriptblock]::Create(
-        'try { throw $ldapException } catch ' + $catchText)
-    $failed = $false
-    try { & $failureTest }
-    catch {
-        $failed = $_.Exception.Message -match 'fixture, search base DC=fixture' -and
-            $_.Exception.Message.Contains("HRESULT=$($ldapException.ErrorCode)") -and
-            $_.Exception.Message -match 'UserCountMethod AD' -and
-            $_.Exception.InnerException -is [System.DirectoryServices.DirectoryServicesCOMException]
+    $userTask = [pscustomobject]@{ Kind = "Users"; Server = "fixture"; SearchBase = "DC=fixture" }
+    $script:userQueryFails = $false
+    foreach ($expectedCount in @(7, 1, 0)) {
+        $script:userFixtureCount = $expectedCount
+        $count = @(& $worker $userTask 10)
+        Assert-Report ($count.Count -eq 1 -and $count[0] -eq $expectedCount) "AD user count returns one accurate count for multiple, single, and empty results."
     }
-    Assert-Report $failed "LDAP failures preserve the original exception and provide target, error code, and explicit alternate-method guidance."
-    $count = & $worker ([pscustomobject]@{ Kind = "Users"; Method = "AD"; Server = "fixture"; SearchBase = "DC=fixture" }) 10
-    Assert-Report ($count -eq 7) "AD user count is streamed."
+    $script:userQueryFails = $true
+    $failed = $false
+    try { & $worker $userTask 10 | Out-Null }
+    catch { $failed = $_.Exception.Message -match "Fixture AD user query failed" }
+    Assert-Report $failed "AD user query failures propagate rather than returning a zero count."
+    $script:userQueryFails = $false
     $script:invalidDisk = $false
     $script:removedSessions = 0
     $disk = & $worker ([pscustomobject]@{ Kind = "Disks"; Server = "fixture" }) 10
@@ -154,7 +123,7 @@ function Invoke-WorkerChecks {
     Assert-Report $failed "Invalid disk capacity is surfaced, not silently defaulted."
     Assert-Report ($script:removedSessions -eq 2) "CIM session is removed after failure."
     $workerText = $worker.ToString()
-    Assert-Report ($workerText -match 'PropertiesToLoad.Add\("objectGUID"\)' -and $workerText -match 'AuthenticationTypes\]::Signing' -and $workerText -match 'AuthenticationTypes\]::Sealing') "LDAP counting requests a minimal property and signs/seals its connection."
+    Assert-Report ($workerText -notmatch 'System.DirectoryServices|LDAP://|\$Task.Method') "Collection uses AD cmdlets without a direct LDAP path or method switch."
     $domainMismatch = $false
     function Get-ADDomain {
         param($Identity, $Server, $ErrorAction)
@@ -201,7 +170,7 @@ function Invoke-CollectionBatch {
             }
             "Status" {
                 $value = [pscustomobject]@{ CurrentTime = Get-Date; Ready = $true; Synchronized = $true }
-                if ($env:AD_REPORT_TEST_SCENARIO -eq "Failures") { $value = $null; $failure = "LDAP error on DC01.contoso.com <unsafe>." }
+                if ($env:AD_REPORT_TEST_SCENARIO -eq "Failures") { $value = $null; $failure = "AD query error on DC01.contoso.com <unsafe>." }
             }
             "Disks" {
                 $value = @(
