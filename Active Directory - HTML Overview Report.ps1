@@ -304,12 +304,24 @@ $collectionWorker = {
                     $entry = [System.DirectoryServices.DirectoryEntry]::new("LDAP://$($Task.Server)/$($Task.SearchBase)", $null, $null, $authentication)
                     $searcher = [System.DirectoryServices.DirectorySearcher]::new($entry)
                     $searcher.Filter = "(&(objectCategory=person)(objectClass=user))"
+                    $searcher.SearchScope = [System.DirectoryServices.SearchScope]::Subtree
+                    $searcher.ReferralChasing = [System.DirectoryServices.ReferralChasingOption]::None
                     $searcher.PageSize = 1000
                     $searcher.ClientTimeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
                     $searcher.ServerTimeLimit = [TimeSpan]::FromSeconds($TimeoutSeconds)
                     $searcher.PropertiesToLoad.Add("objectGUID") | Out-Null
                     $results = $searcher.FindAll()
                     $results.Count
+                }
+                catch {
+                    $cause = $_.Exception.GetBaseException()
+                    $details = $cause.Message
+                    if ($cause -is [System.DirectoryServices.DirectoryServicesCOMException]) {
+                        $details += " HRESULT=$($cause.ErrorCode); LDAP extended error=$($cause.ExtendedError): $($cause.ExtendedErrorMessage)"
+                    }
+                    throw [System.InvalidOperationException]::new(
+                        "LDAP user count failed on $($Task.Server), search base $($Task.SearchBase). $details Use -UserCountMethod AD to explicitly select the AD cmdlet path.",
+                        $cause)
                 }
                 finally {
                     # Bypass the directory-object adapter, which can bind to LDAP during member lookup.

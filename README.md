@@ -30,7 +30,7 @@ certificate checks to make a failed query work.
 | `ThrottleLimit` | `4` | Maximum simultaneous collection jobs, configurable from 1 to 16. Jobs are process-isolated for reliable cancellation and Windows PowerShell 5.1 compatibility. Startup overhead may outweigh parallelism gains for small environments. |
 | `OperationTimeoutSeconds` | `60` | Per-job wall-clock deadline, including startup; inventory is one job and user count and each DC health/disk check are separate jobs. Increase this for large or slow directories. |
 | `DiagnosticsTimeoutSeconds` | `300` | Deadline for each native diagnostic process. |
-| `UserCountMethod` | `LDAP` | Paged, signed/sealed LDAP search requesting only `objectGUID`; `AD` streams `Get-ADUser` results through `Measure-Object`. Neither counts users in other domains. |
+| `UserCountMethod` | `LDAP` | Paged, signed/sealed LDAP subtree search requesting only `objectGUID`, with referral chasing disabled to stay within the selected domain; `AD` streams `Get-ADUser` results through `Measure-Object`. Neither counts users in other domains. |
 | `IncludeDiagnosticDetails` | Off | Include complete native output and detailed collection errors. DCDIAG `/q` output is retained without language-dependent filtering. |
 | `IncludeCreatorIdentity` | Off | Include the generating user and workstation in the report. |
 | `RedactSensitiveData` | Off | Mask known internal domain/server names, sites, creator identity, and IPv4 addresses in rendered text. Best-effort only: unexpected names or other identifiers in raw diagnostics may remain. Review before sharing. |
@@ -59,6 +59,10 @@ coverage. The maximum is `7200` seconds. A timeout remains an unavailable check,
 not a healthy result. If LDAP user counting still reports an operations error,
 use `-UserCountMethod AD` and review the detailed warning; this explicitly selects
 the AD cmdlet path rather than silently falling back after an LDAP failure.
+LDAP failures include the target server and search base, plus the HRESULT and
+extended LDAP error when available. Disabling referrals avoids failures while
+following references outside the selected domain; it does not resolve all
+authentication, connectivity, or directory-service errors.
 
 Reports are first written to a temporary sibling file and then moved into place.
 Native tools are invoked from their Windows system location, not command lookup.

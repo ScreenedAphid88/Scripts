@@ -102,8 +102,32 @@ function Invoke-WorkerChecks {
     $entry = [System.DirectoryServices.DirectoryEntry]::new("InvalidProvider://fixture")
     $searcher = [System.DirectoryServices.DirectorySearcher]::new($entry)
     $results = $null
+    $settings = $ldapTry.Body.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            $node.Left.Extent.Text -match '^\$searcher\.(Filter|SearchScope|ReferralChasing|PageSize|ClientTimeout|ServerTimeLimit)$'
+    }, $true)
+    $TimeoutSeconds = 10
+    & ([scriptblock]::Create(($settings | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine))
+    Assert-Report ($searcher.SearchScope -eq [System.DirectoryServices.SearchScope]::Subtree) "LDAP counting searches the entire selected domain subtree."
+    Assert-Report ($searcher.ReferralChasing -eq [System.DirectoryServices.ReferralChasingOption]::None) "Domain-scoped LDAP counting does not chase referrals."
+    Assert-Report ($searcher.PageSize -eq 1000 -and $searcher.Filter -eq "(&(objectCategory=person)(objectClass=user))") "LDAP counting retains paging and the user-only filter."
     & $cleanup
     Assert-Report $true "LDAP cleanup disposes unbound directory objects without invoking the directory-object adapter."
+    $Task = [pscustomobject]@{ Server = "fixture"; SearchBase = "DC=fixture" }
+    $catchText = $ldapTry.CatchClauses[0].Body.Extent.Text
+    $ldapException = [System.DirectoryServices.DirectoryServicesCOMException]::new("Fixture operations error.")
+    $failureTest = [scriptblock]::Create(
+        'try { throw $ldapException } catch ' + $catchText)
+    $failed = $false
+    try { & $failureTest }
+    catch {
+        $failed = $_.Exception.Message -match 'fixture, search base DC=fixture' -and
+            $_.Exception.Message.Contains("HRESULT=$($ldapException.ErrorCode)") -and
+            $_.Exception.Message -match 'UserCountMethod AD' -and
+            $_.Exception.InnerException -is [System.DirectoryServices.DirectoryServicesCOMException]
+    }
+    Assert-Report $failed "LDAP failures preserve the original exception and provide target, error code, and explicit alternate-method guidance."
     $count = & $worker ([pscustomobject]@{ Kind = "Users"; Method = "AD"; Server = "fixture"; SearchBase = "DC=fixture" }) 10
     Assert-Report ($count -eq 7) "AD user count is streamed."
     $script:invalidDisk = $false
