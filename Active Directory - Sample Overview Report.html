@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+  (() => {
+    const param = new URLSearchParams(window.location.search).get("scoutTheme");
+    const theme =
+      param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
+<title>Sample Active Directory Environment Overview</title>
+<style>
+:root {
+  color-scheme: light;
+  --cp-bg: #f7f4ef;
+  --cp-bg-elevated: #fcfbf8;
+  --cp-surface: #ffffff;
+  --cp-surface-soft: #f5f5f5;
+  --cp-border: #dedede;
+  --cp-border-strong: #919191;
+  --cp-text: #242424;
+  --cp-text-muted: #5c5c5c;
+  --cp-text-soft: #6f6f6f;
+  --cp-accent: #b11f4b;
+  --cp-accent-hover: #9a1a41;
+  --cp-accent-soft: rgba(177, 31, 75, 0.08);
+  --cp-accent-fg: #ffffff;
+  --cp-success: #16a34a;
+  --cp-danger: #dc2626;
+  --cp-warning: #f59e0b;
+  --cp-link: #0078d4;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+  --cp-overlay: rgba(255, 255, 255, 0.8);
+  --cp-panel: rgba(255, 255, 255, 0.86);
+  --cp-panel-strong: rgba(255, 255, 255, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.55);
+  --cp-highlight: rgba(177, 31, 75, 0.12);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --cp-bg: #3d3b3a;
+  --cp-bg-elevated: #343231;
+  --cp-surface: #292929;
+  --cp-surface-soft: #2e2e2e;
+  --cp-border: #474747;
+  --cp-border-strong: #5f5f5f;
+  --cp-text: #dedede;
+  --cp-text-muted: #919191;
+  --cp-text-soft: #b0b0b0;
+  --cp-accent: #fd8ea1;
+  --cp-accent-hover: #fb7b91;
+  --cp-accent-soft: rgba(253, 142, 161, 0.14);
+  --cp-accent-fg: #1a1a1a;
+  --cp-success: #4ade80;
+  --cp-danger: #f87171;
+  --cp-warning: #fbbf24;
+  --cp-link: #4da6ff;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  --cp-overlay: rgba(41, 41, 41, 0.88);
+  --cp-panel: rgba(41, 41, 41, 0.72);
+  --cp-panel-strong: rgba(41, 41, 41, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.04);
+  --cp-highlight: rgba(253, 142, 161, 0.12);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--cp-bg);
+  color: var(--cp-text);
+  font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.5;
+}
+button { font: inherit; }
+.shell { width: min(1400px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0 64px; }
+.hero {
+  display: flex; justify-content: space-between; gap: 24px; align-items: flex-start;
+  padding: 28px; border: 1px solid var(--cp-border); border-top: 4px solid var(--cp-accent);
+  border-radius: 16px; background: var(--cp-bg-elevated); box-shadow: 0 1px 2px var(--cp-border);
+}
+.hero h1 { margin: 4px 0 8px; font-size: clamp(1.75rem, 4vw, 2.75rem); line-height: 1.1; }
+.hero p { margin: 0; color: var(--cp-text-muted); }
+.eyebrow {
+  margin: 0; color: var(--cp-accent); font-size: .75rem; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+}
+.sample-banner {
+  margin-top: 16px; padding: 12px 16px; border: 1px solid var(--cp-warning);
+  border-radius: .625rem; color: var(--cp-warning); background: var(--cp-surface);
+}
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.button {
+  border: 1px solid var(--cp-border-strong); border-radius: .625rem;
+  background: var(--cp-surface); color: var(--cp-text); padding: 9px 14px; cursor: pointer;
+}
+.button:hover { border-color: var(--cp-accent); color: var(--cp-accent); }
+.summary-grid, .health-grid, .disk-grid, .details-grid, .diagnostics-grid {
+  display: grid; gap: 16px; margin-top: 20px;
+}
+.summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.health-grid, .disk-grid, .details-grid, .diagnostics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.card {
+  border: 1px solid var(--cp-border); border-radius: 16px; background: var(--cp-surface);
+  box-shadow: 0 1px 2px var(--cp-border);
+}
+.metric { padding: 20px; }
+.metric span { color: var(--cp-text-muted); font-size: .875rem; }
+.metric strong { display: block; margin-top: 4px; font-size: 2rem; line-height: 1.1; }
+.section { margin-top: 32px; }
+.section-heading { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 12px; }
+.section-heading h2 { margin: 0; font-size: 1.35rem; }
+.section-heading p { margin: 0; color: var(--cp-text-muted); font-size: .875rem; }
+.health-card { padding: 24px; display: flex; align-items: center; gap: 24px; }
+.donut {
+  width: 112px; height: 112px; flex: 0 0 112px; border-radius: 50%;
+  display: grid; place-items: center; position: relative;
+  background: conic-gradient(var(--cp-success) 0deg 360deg, var(--cp-surface-soft) 360deg);
+}
+.donut::after {
+  content: ""; width: 76px; height: 76px; position: absolute;
+  border-radius: 50%; background: var(--cp-surface);
+}
+.donut strong { position: relative; z-index: 1; font-size: 1.35rem; }
+.health-card h3 { margin: 0 0 4px; }
+.health-card p { margin: 0; color: var(--cp-text-muted); }
+.table-card { overflow: hidden; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td {
+  padding: 13px 16px; border-bottom: 1px solid var(--cp-border);
+  text-align: left; vertical-align: middle; white-space: nowrap;
+}
+th {
+  background: var(--cp-surface-soft); color: var(--cp-text-muted);
+  font-size: .75rem; letter-spacing: .05em; text-transform: uppercase;
+}
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: var(--cp-accent-soft); }
+.subtle { display: block; color: var(--cp-text-muted); font-size: .75rem; font-weight: 400; }
+.badge {
+  display: inline-flex; align-items: center; border: 1px solid currentColor;
+  border-radius: 999px; padding: 3px 9px; font-size: .75rem; font-weight: 700;
+}
+.success { color: var(--cp-success); }
+.warning { color: var(--cp-warning); }
+.neutral { color: var(--cp-text-muted); }
+.disk-card, .detail-card { padding: 20px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; }
+.card-header h3 { margin: 2px 0 0; }
+.disk-row + .disk-row { margin-top: 20px; }
+.disk-heading { display: flex; justify-content: space-between; gap: 12px; font-size: .875rem; }
+.disk-heading span, .disk-caption { color: var(--cp-text-muted); }
+.progress {
+  height: 12px; margin: 7px 0 4px; overflow: hidden; border-radius: 999px;
+  background: var(--cp-surface-soft); border: 1px solid var(--cp-border);
+}
+.progress span { display: block; height: 100%; background: currentColor; border-radius: inherit; }
+.disk-caption { font-size: .75rem; text-align: right; }
+.facts { margin: 0; display: grid; gap: 12px; }
+.facts div { display: flex; justify-content: space-between; gap: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--cp-border); }
+.facts div:last-child { padding-bottom: 0; border-bottom: 0; }
+.facts dt { color: var(--cp-text-muted); }
+.facts dd { margin: 0; font-weight: 700; text-align: right; }
+.server-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.server-list li { display: flex; align-items: center; gap: 8px; }
+.status-dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.role-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.role-card {
+  padding: 16px; border: 1px solid var(--cp-border); border-radius: .625rem; background: var(--cp-surface);
+}
+.role-card span { display: block; color: var(--cp-text-muted); font-size: .75rem; margin-bottom: 6px; }
+.role-card strong { overflow-wrap: anywhere; }
+.diagnostic { overflow: hidden; }
+.diagnostic-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--cp-border);
+}
+.diagnostic-header h3 { margin: 0; }
+pre {
+  min-height: 150px; margin: 0; padding: 18px; background: var(--cp-surface-soft);
+  color: var(--cp-text); font: .8rem/1.55 Consolas, "Courier New", Courier, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.footer { margin-top: 32px; color: var(--cp-text-muted); font-size: .8rem; text-align: center; }
+@media (max-width: 1000px) {
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .role-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .shell { width: min(100% - 20px, 1400px); padding-top: 10px; }
+  .hero { padding: 20px; flex-direction: column; }
+  .summary-grid, .health-grid, .disk-grid, .details-grid, .diagnostics-grid, .role-grid { grid-template-columns: 1fr; }
+  .health-card { align-items: flex-start; flex-direction: column; }
+}
+@media print {
+  .shell { width: 100%; padding: 0; }
+  .actions, .sample-banner { display: none; }
+  .card, .hero, .role-card { box-shadow: none; break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Infrastructure health report</p>
+      <h1>Active Directory Overview</h1>
+      <p>contoso.com &middot; Generated October 7, 2026 at 10:43 AM</p>
+    </div>
+    <div class="actions">
+      <button class="button" type="button" onclick="toggleTheme()">Toggle theme</button>
+      <button class="button" type="button" onclick="window.print()">Print report</button>
+    </div>
+  </header>
+
+  <aside class="sample-banner"><strong>Sample report:</strong> All domain names, server names, addresses, and measurements are fictional.</aside>
+
+  <aside class="sample-banner"><strong>Confidential infrastructure information.</strong> Share only with authorized recipients.</aside>
+
+  <section class="section">
+    <div class="section-heading"><h2>Collection status</h2><span class="badge success">Complete</span></div>
+    <div class="card detail-card">All requested checks completed without collection warnings.</div>
+    <p class="subtle">0 warnings. Diagnostics scope: Full. Raw diagnostic details enabled for this fictional example.</p>
+  </section>
+
+  <section class="summary-grid" aria-label="Environment summary">
+    <article class="card metric"><span>User objects</span><strong>1,247</strong></article>
+    <article class="card metric"><span>Domain controllers</span><strong>2</strong></article>
+    <article class="card metric"><span>Forest functional level</span><strong>7</strong></article>
+    <article class="card metric"><span>Domain functional level</span><strong>7</strong></article>
+  </section>
+
+  <section class="section">
+    <div class="section-heading"><h2>Domain and forest</h2><p>Configuration details</p></div>
+    <div class="details-grid">
+      <article class="card detail-card">
+        <h3>Directory configuration</h3>
+        <dl class="facts">
+          <div><dt>Domain</dt><dd>contoso.com</dd></div>
+          <div><dt>NetBIOS name</dt><dd>CONTOSO</dd></div>
+          <div><dt>Forest</dt><dd>contoso.com</dd></div>
+          <div><dt>Domain mode</dt><dd>Windows2016Domain</dd></div>
+          <div><dt>Forest mode</dt><dd>Windows2016Forest</dd></div>
+        </dl>
+      </article>
+      <article class="card detail-card">
+        <h3>Global Catalog servers</h3>
+        <ul class="server-list">
+          <li><span class="status-dot neutral"></span>DC01.contoso.com</li>
+          <li><span class="status-dot neutral"></span>DC02.contoso.com</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-heading"><h2>FSMO role holders</h2><p>Flexible Single Master Operations</p></div>
+    <div class="role-grid">
+      <div class="role-card"><span>Schema Master</span><strong>DC01.contoso.com</strong></div>
+      <div class="role-card"><span>Domain Naming Master</span><strong>DC01.contoso.com</strong></div>
+      <div class="role-card"><span>PDC Emulator</span><strong>DC01.contoso.com</strong></div>
+      <div class="role-card"><span>RID Master</span><strong>DC01.contoso.com</strong></div>
+      <div class="role-card"><span>Infrastructure Master</span><strong>DC02.contoso.com</strong></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-heading"><h2>Directory health</h2><p>Readiness and synchronization across all domain controllers</p></div>
+    <div class="health-grid">
+      <article class="card health-card">
+        <div class="donut"><strong>100%</strong></div>
+        <div><h3>Global Catalog readiness</h3><p>2 of 2 configured Global Catalogs are ready; 0 unavailable.</p></div>
+      </article>
+      <article class="card health-card">
+        <div class="donut"><strong>100%</strong></div>
+        <div><h3>Directory synchronization</h3><p>2 of 2 domain controllers are synchronized; 0 unavailable.</p></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-heading"><h2>Domain controllers</h2><p>Inventory and current health state</p></div>
+    <div class="card table-card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Server</th><th>IP address</th><th>Site</th><th>Operating system</th><th>Server time</th><th>GC status</th><th>Sync status</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>DC01</strong><span class="subtle">DC01.contoso.com</span></td>
+              <td>10.20.0.10</td><td>Headquarters</td><td>Windows Server 2022</td><td>2026-10-07 10:43:32</td>
+              <td><span class="badge success">Ready</span></td><td><span class="badge success">Synchronized</span></td>
+            </tr>
+            <tr>
+              <td><strong>DC02</strong><span class="subtle">DC02.contoso.com</span></td>
+              <td>10.20.0.11</td><td>Headquarters</td><td>Windows Server 2022</td><td>2026-10-07 10:43:33</td>
+              <td><span class="badge success">Ready</span></td><td><span class="badge success">Synchronized</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-heading"><h2>Disk capacity</h2><p>Free space on fixed drives; under 20% is highlighted</p></div>
+    <div class="disk-grid">
+      <article class="card disk-card">
+        <div class="card-header"><div><p class="eyebrow">Domain controller</p><h3>DC01</h3></div><span class="badge neutral">10.20.0.10</span></div>
+        <div class="disk-row">
+          <div class="disk-heading"><strong>C:</strong><span>68.4 GB free of 127.0 GB</span></div>
+          <div class="progress"><span class="success" style="width:53.9%"></span></div><div class="disk-caption">53.9% free</div>
+        </div>
+        <div class="disk-row">
+          <div class="disk-heading"><strong>D:</strong><span>191.7 GB free of 250.0 GB</span></div>
+          <div class="progress"><span class="success" style="width:76.7%"></span></div><div class="disk-caption">76.7% free</div>
+        </div>
+      </article>
+      <article class="card disk-card">
+        <div class="card-header"><div><p class="eyebrow">Domain controller</p><h3>DC02</h3></div><span class="badge neutral">10.20.0.11</span></div>
+        <div class="disk-row">
+          <div class="disk-heading"><strong>C:</strong><span>72.1 GB free of 127.0 GB</span></div>
+          <div class="progress"><span class="success" style="width:56.8%"></span></div><div class="disk-caption">56.8% free</div>
+        </div>
+        <div class="disk-row">
+          <div class="disk-heading"><strong>D:</strong><span>184.5 GB free of 250.0 GB</span></div>
+          <div class="progress"><span class="success" style="width:73.8%"></span></div><div class="disk-caption">73.8% free</div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-heading"><h2>Diagnostics</h2><p>Replication and domain-controller checks</p></div>
+    <div class="diagnostics-grid">
+      <article class="card diagnostic">
+        <div class="diagnostic-header"><h3>Replication summary</h3><span class="badge success">Command completed</span></div>
+        <pre>repadmin completed successfully. Its exit code alone does not establish replication health; review its output.
+
+Replication Summary Start Time: 2026-10-07 10:43:36
+
+Source DSA          largest delta    fails/total %%   error
+ DC01                      03m:12s    0 /   5    0
+ DC02                      02m:47s    0 /   5    0
+
+No replication errors were found.</pre>
+      </article>
+      <article class="card diagnostic">
+        <div class="diagnostic-header"><h3>DCDIAG errors</h3><span class="badge success">No reported errors</span></div>
+        <pre>No errors found in dcdiag results.</pre>
+      </article>
+    </div>
+  </section>
+
+  <footer class="footer">Sample generated for demonstration only. Values do not represent a real Active Directory environment.</footer>
+</main>
+<script>
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme");
+  document.documentElement.setAttribute("data-theme", current === "dark" ? "light" : "dark");
+}
+</script>
+</body>
+</html>
