@@ -301,7 +301,9 @@ $collectionWorker = {
                     $authentication = [System.DirectoryServices.AuthenticationTypes]::Secure -bor
                         [System.DirectoryServices.AuthenticationTypes]::Signing -bor
                         [System.DirectoryServices.AuthenticationTypes]::Sealing
-                    $entry = [System.DirectoryServices.DirectoryEntry]::new("LDAP://$($Task.Server)/$($Task.SearchBase)", $null, $null, $authentication)
+                    # The credential overload converts PowerShell $null strings to empty credentials.
+                    $entry = [System.DirectoryServices.DirectoryEntry]::new("LDAP://$($Task.Server)/$($Task.SearchBase)")
+                    $entry.psbase.AuthenticationType = $authentication
                     $searcher = [System.DirectoryServices.DirectorySearcher]::new($entry)
                     $searcher.Filter = "(&(objectCategory=person)(objectClass=user))"
                     $searcher.SearchScope = [System.DirectoryServices.SearchScope]::Subtree

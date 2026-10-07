@@ -99,7 +99,19 @@ function Invoke-WorkerChecks {
     }, $true)
     $cleanupText = $ldapTry.Finally.Extent.Text
     $cleanup = [scriptblock]::Create($cleanupText.Substring(1, $cleanupText.Length - 2))
-    $entry = [System.DirectoryServices.DirectoryEntry]::new("InvalidProvider://fixture")
+    $Task = [pscustomobject]@{ Server = "fixture"; SearchBase = "DC=fixture" }
+    $connectionSettings = $ldapTry.Body.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            $node.Left.Extent.Text -in @('$authentication', '$entry', '$entry.psbase.AuthenticationType')
+    }, $true)
+    . ([scriptblock]::Create(($connectionSettings | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine))
+    Assert-Report ($null -eq $entry.psbase.Username) "LDAP uses default Windows credentials, not an empty username coerced from PowerShell null."
+    $expectedAuthentication = [System.DirectoryServices.AuthenticationTypes]::Secure -bor
+        [System.DirectoryServices.AuthenticationTypes]::Signing -bor
+        [System.DirectoryServices.AuthenticationTypes]::Sealing
+    Assert-Report ($entry.psbase.AuthenticationType -eq $expectedAuthentication) "Default-credential LDAP connections retain secure authentication, signing, and sealing."
+    $entry.psbase.Path = "InvalidProvider://fixture"
     $searcher = [System.DirectoryServices.DirectorySearcher]::new($entry)
     $results = $null
     $settings = $ldapTry.Body.FindAll({

@@ -51,6 +51,10 @@ RootDSE health flags are unwrapped from AD property collections before Boolean
 conversion. Missing, multi-valued, or invalid flags fail the health check rather
 than being treated as healthy. LDAP resources are disposed through `psbase`
 to avoid directory lookups during PowerShell member resolution.
+LDAP uses the path-only `DirectoryEntry` constructor and then sets authentication
+flags through `psbase`, preserving default Windows credentials. Passing
+PowerShell `$null` to the constructor's username/password string arguments
+converts them to empty credentials and can cause an unauthenticated-bind error.
 
 If DCDIAG reaches its deadline, use `-DiagnosticsLevel Quick` for the selected
 controller's connectivity, advertising, and replication tests, or increase
