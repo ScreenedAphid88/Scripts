@@ -280,13 +280,29 @@ $collectionWorker = {
             if ($root.defaultNamingContext -ne $domainInfo.DistinguishedName) {
                 throw "The selected server does not serve the requested domain."
             }
+            $forest = Get-ADForest -Identity $domainInfo.Forest -Server $targetServer -ErrorAction Stop
+            $controllers = [System.Collections.Generic.List[object]]::new()
+            $controllerErrors = [System.Collections.Generic.List[object]]::new()
+            foreach ($forestDomain in @($forest.Domains | Sort-Object)) {
+                $isSelectedDomain = $forestDomain -eq $domainInfo.DNSRoot
+                $controllerServer = if ($isSelectedDomain) { $targetServer } else { $forestDomain }
+                try {
+                    Get-ADDomainController -Filter * -Server $controllerServer -ErrorAction Stop |
+                        Select-Object Name, HostName, Domain, IPv4Address, Site, OperatingSystem, IsGlobalCatalog |
+                        ForEach-Object { $controllers.Add($_) }
+                }
+                catch {
+                    if ($isSelectedDomain) { throw }
+                    $controllerErrors.Add([pscustomobject]@{ Domain = [string]$forestDomain; Message = $_.Exception.Message })
+                }
+            }
             [pscustomobject]@{
                 Domain = $domainInfo
                 Server = $targetServer
                 Root = $root
-                Forest = Get-ADForest -Identity $domainInfo.Forest -Server $targetServer -ErrorAction Stop
-                Controllers = @(Get-ADDomainController -Filter * -Server $targetServer -ErrorAction Stop |
-                    Sort-Object Name | Select-Object Name, HostName, IPv4Address, Site, OperatingSystem, IsGlobalCatalog)
+                Forest = $forest
+                Controllers = @($controllers | Sort-Object Domain, Name)
+                ControllerErrors = @($controllerErrors)
             }
         }
         "Users" {
@@ -351,9 +367,12 @@ $redactionValues = @(
     $domainInfo.DistinguishedName; $env:USERNAME; $env:COMPUTERNAME; $targetServer
     $forestInfo.SchemaMaster; $forestInfo.DomainNamingMaster
     $domainInfo.PDCEmulator; $domainInfo.RIDMaster; $domainInfo.InfrastructureMaster
-    $forestInfo.GlobalCatalogs
-    foreach ($dc in $domainControllers) { $dc.HostName; $dc.Name; $dc.IPv4Address; $dc.Site }
+    $forestInfo.GlobalCatalogs; $forestInfo.Domains
+    foreach ($dc in $domainControllers) { $dc.HostName; $dc.Name; $dc.Domain; $dc.IPv4Address; $dc.Site }
 ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique | Sort-Object { $_.Length } -Descending
+foreach ($controllerError in @($inventory.Value.ControllerErrors)) {
+    Add-CollectionWarning -Target $controllerError.Domain -Check "Domain controller inventory" -Message "Domain controllers in this forest domain were not listed or checked. $($controllerError.Message)"
+}
 
 $userTask = [pscustomobject]@{ Kind = "Users"; Name = "User count"; SearchBase = $domainInfo.DistinguishedName; Server = $targetServer }
 $tasks = @(
@@ -377,7 +396,7 @@ $domainControllerResults = @(
             Add-CollectionWarning -Target $dc.Name -Check "Disk capacity" -Message "No fixed disks were returned."
         }
         [pscustomobject]@{
-            Name = $dc.Name; HostName = $dc.HostName; IPv4Address = $dc.IPv4Address
+            Name = $dc.Name; HostName = $dc.HostName; Domain = $dc.Domain; IPv4Address = $dc.IPv4Address
             Site = $dc.Site; OperatingSystem = $dc.OperatingSystem; IsGlobalCatalog = [bool]$dc.IsGlobalCatalog
             CurrentTime = if ($available) { $status.Value.CurrentTime } else { $null }
             IsGlobalCatalogReady = if ($available) { $status.Value.Ready } else { $false }
@@ -447,6 +466,7 @@ $domainControllerRows = foreach ($dc in $domainControllerResults) {
     @"
 <tr>
   <td><strong>$(ConvertTo-HtmlEncoded $dc.Name)</strong><span class="subtle">$(ConvertTo-HtmlEncoded $dc.HostName)</span></td>
+  <td>$(ConvertTo-HtmlEncoded $dc.Domain)</td>
   <td>$(ConvertTo-HtmlEncoded $dc.IPv4Address)</td>
   <td>$(ConvertTo-HtmlEncoded $dc.Site)</td>
   <td>$(ConvertTo-HtmlEncoded $dc.OperatingSystem)</td>
@@ -494,7 +514,7 @@ $diskCards = foreach ($dc in $domainControllerResults) {
 <article class="card disk-card">
   <div class="card-header">
     <div>
-      <p class="eyebrow">Domain controller</p>
+      <p class="eyebrow">$(ConvertTo-HtmlEncoded $dc.Domain)</p>
       <h3>$(ConvertTo-HtmlEncoded $dc.Name)</h3>
     </div>
     <span class="badge neutral">$(ConvertTo-HtmlEncoded $dc.IPv4Address)</span>
@@ -868,11 +888,11 @@ pre {
   </section>
 
   <section class="section">
-    <div class="section-heading"><h2>Domain controllers</h2><p>Inventory and current health state</p></div>
+    <div class="section-heading"><h2>Domain controllers</h2><p>Forest-wide inventory and current health state</p></div>
     <div class="card table-card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Server</th><th>IP address</th><th>Site</th><th>Operating system</th><th>Server time</th><th>GC status</th><th>Sync status</th></tr></thead>
+          <thead><tr><th>Server</th><th>Domain</th><th>IP address</th><th>Site</th><th>Operating system</th><th>Server time</th><th>GC status</th><th>Sync status</th></tr></thead>
           <tbody>$($domainControllerRows -join [Environment]::NewLine)</tbody>
         </table>
       </div>

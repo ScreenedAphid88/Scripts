@@ -124,6 +124,39 @@ function Invoke-WorkerChecks {
     Assert-Report ($script:removedSessions -eq 2) "CIM session is removed after failure."
     $workerText = $worker.ToString()
     Assert-Report ($workerText -notmatch 'System.DirectoryServices|LDAP://|\$Task.Method') "Collection uses AD cmdlets without a direct LDAP path or method switch."
+    function Get-ADDomain {
+        param($Identity, $Server, $ErrorAction)
+        [pscustomobject]@{ DistinguishedName = "DC=fixture"; DNSRoot = "child.fixture"; Forest = "fixture"; PDCEmulator = "fixture" }
+    }
+    function Get-ADForest {
+        param($Identity, $Server, $ErrorAction)
+        [pscustomobject]@{ Name = "fixture"; Domains = @("fixture", "child.fixture", "other.fixture") }
+    }
+    function Get-ADDomainController {
+        param($Filter, $Server, $ErrorAction)
+        $script:controllerServers += $Server
+        if ($Server -eq $script:failingControllerServer) { throw "Fixture $Server unreachable." }
+        switch ($Server) {
+            "child-dc.fixture" { [pscustomobject]@{ Name = "CHILD1"; HostName = "child1.child.fixture"; Domain = "child.fixture"; IPv4Address = "10.0.0.2"; Site = "S"; OperatingSystem = "OS"; IsGlobalCatalog = $true } }
+            "fixture" { [pscustomobject]@{ Name = "ROOT1"; HostName = "root1.fixture"; Domain = "fixture"; IPv4Address = "10.0.0.1"; Site = "S"; OperatingSystem = "OS"; IsGlobalCatalog = $true } }
+            "other.fixture" { [pscustomobject]@{ Name = "OTHER1"; HostName = "other1.other.fixture"; Domain = "other.fixture"; IPv4Address = "10.0.0.3"; Site = "S"; OperatingSystem = "OS"; IsGlobalCatalog = $false } }
+        }
+    }
+    $inventoryTask = [pscustomobject]@{ Kind = "Inventory"; Domain = $null; Server = "child-dc.fixture" }
+    $script:controllerServers = @()
+    $script:failingControllerServer = $null
+    $inventory = & $worker $inventoryTask 10
+    Assert-Report ((@($inventory.Controllers.Name) -join ",") -eq "CHILD1,ROOT1,OTHER1") "Inventory lists DCs from every forest domain, sorted by domain then name."
+    Assert-Report ("child-dc.fixture" -in $script:controllerServers -and "fixture" -in $script:controllerServers -and "child.fixture" -notin $script:controllerServers) "The selected domain is queried through the selected server; other domains by DNS name."
+    Assert-Report (@($inventory.ControllerErrors).Count -eq 0) "Healthy forest inventory reports no controller errors."
+    $script:failingControllerServer = "fixture"
+    $inventory = & $worker $inventoryTask 10
+    Assert-Report ((@($inventory.Controllers.Name) -join ",") -eq "CHILD1,OTHER1" -and @($inventory.ControllerErrors).Count -eq 1 -and $inventory.ControllerErrors[0].Domain -eq "fixture" -and $inventory.ControllerErrors[0].Message -match "unreachable") "An unreachable other forest domain is reported without discarding reachable DCs."
+    $script:failingControllerServer = "child-dc.fixture"
+    $failed = $false
+    try { & $worker $inventoryTask 10 | Out-Null }
+    catch { $failed = $_.Exception.Message -match "unreachable" }
+    Assert-Report $failed "Failure to list the selected domain's DCs stops inventory."
     $domainMismatch = $false
     function Get-ADDomain {
         param($Identity, $Server, $ErrorAction)
@@ -151,17 +184,24 @@ function Invoke-CollectionBatch {
                 }
                 $forest = [pscustomobject]@{
                     SchemaMaster = "DC01.contoso.com"; DomainNamingMaster = "DC01.contoso.com"
-                    ForestMode = "Windows2016Forest"; GlobalCatalogs = @("DC01.contoso.com")
+                    ForestMode = "Windows2016Forest"; GlobalCatalogs = @("DC01.contoso.com", "ROOTDC.fabrikam.com")
+                    Domains = @("contoso.com", "fabrikam.com")
                 }
                 $controllers = @(
-                    [pscustomobject]@{ Name = "DC01"; HostName = "DC01.contoso.com"; IPv4Address = "10.20.0.10"; Site = "Headquarters"; OperatingSystem = "Windows Server <2022>"; IsGlobalCatalog = $true }
-                    [pscustomobject]@{ Name = "DC02"; HostName = "DC02.contoso.com"; IPv4Address = "10.20.0.11"; Site = "Headquarters"; OperatingSystem = "Windows Server 2022"; IsGlobalCatalog = $false }
+                    [pscustomobject]@{ Name = "DC01"; HostName = "DC01.contoso.com"; Domain = "contoso.com"; IPv4Address = "10.20.0.10"; Site = "Headquarters"; OperatingSystem = "Windows Server <2022>"; IsGlobalCatalog = $true }
+                    [pscustomobject]@{ Name = "DC02"; HostName = "DC02.contoso.com"; Domain = "contoso.com"; IPv4Address = "10.20.0.11"; Site = "Headquarters"; OperatingSystem = "Windows Server 2022"; IsGlobalCatalog = $false }
+                    [pscustomobject]@{ Name = "ROOTDC"; HostName = "ROOTDC.fabrikam.com"; Domain = "fabrikam.com"; IPv4Address = "10.30.0.10"; Site = "Headquarters"; OperatingSystem = "Windows Server 2022"; IsGlobalCatalog = $true }
                 )
+                $controllerErrors = @()
                 if ($env:AD_REPORT_TEST_SCENARIO -eq "Single") { $controllers = @($controllers[0]) }
+                if ($env:AD_REPORT_TEST_SCENARIO -eq "Failures") {
+                    $controllers = @($controllers[0..1])
+                    $controllerErrors = @([pscustomobject]@{ Domain = "fabrikam.com"; Message = "Server ROOTDC.fabrikam.com unreachable." })
+                }
                 $value = [pscustomobject]@{
                     Domain = $domain; Forest = $forest; Server = "DC01.contoso.com"
                     Root = [pscustomobject]@{ forestFunctionality = 7; domainFunctionality = 7 }
-                    Controllers = $controllers
+                    Controllers = $controllers; ControllerErrors = $controllerErrors
                 }
             }
             "Users" {
@@ -225,7 +265,9 @@ try {
     Assert-Report ($file -is [System.IO.FileInfo]) "Report returns a FileInfo, not status text."
     $html = Get-Content -LiteralPath $file.FullName -Raw
     Assert-Report ($html -match "Not a Global Catalog") "Non-GC controller is labeled correctly."
-    Assert-Report ($html -match "1 of 1 configured Global Catalogs") "GC denominator excludes non-GCs."
+    Assert-Report ($html -match "2 of 2 configured Global Catalogs") "GC denominator excludes non-GCs."
+    Assert-Report ($html -match "3 of 3 domain controllers" -and $html -match "<td>fabrikam\.com</td>" -and $html -match "ROOTDC\.fabrikam\.com") "Forest-root DCs appear in directory health and the controller table with their domain."
+    Assert-Report ($html -match '<p class="eyebrow">fabrikam\.com</p>\s*<h3>ROOTDC</h3>') "Forest-root DCs appear in disk capacity, labeled by domain."
     Assert-Report ($html -match "Skipped" -and $html -notmatch "Generated by") "Skipped diagnostics and opt-in identity are explicit."
     Assert-Report ($html -match "Windows Server &lt;2022&gt;") "Inventory text is HTML-encoded."
     Assert-Report ($html -match 'class="danger" style="width: 9.9%' -and $html -match 'class="warning" style="width: 15.0%') "Disk thresholds and invariant CSS values are correct."
@@ -254,7 +296,8 @@ try {
     $redactedPath = Join-Path $testDirectory "redacted.html"
     & $mockReport -OutputPath $redactedPath -DiagnosticsLevel None -RedactSensitiveData -IncludeDiagnosticDetails -IncludeCreatorIdentity -WarningAction SilentlyContinue | Out-Null
     $redacted = Get-Content -LiteralPath $redactedPath -Raw
-    Assert-Report ($redacted -notmatch "contoso|DC01|DC02|10\.20\.0\.|Headquarters") "Known infrastructure identifiers are redacted throughout the HTML."
+    Assert-Report ($redacted -notmatch "contoso|fabrikam|DC01|DC02|ROOTDC|10\.20\.0\.|10\.30\.0\.|Headquarters") "Known infrastructure identifiers are redacted throughout the HTML."
+    Assert-Report ($redacted -match "Domain controller inventory" -and $redacted -match "were not listed or checked") "Unreachable forest domains are reported as collection warnings."
     Assert-Report ($redacted -match "\[redacted\]" -and $redacted -match "&lt;unsafe&gt;") "Redacted error details remain HTML-encoded."
     Assert-Report ($redacted -match "Review required" -and $redacted -match "Unavailable") "Partial collection is not shown as healthy."
     $privatePath = Join-Path $testDirectory "private.html"

@@ -49,6 +49,14 @@ non-GC controllers are excluded from the GC-readiness denominator. Repadmin's
 exit code indicates command completion, not independently verified replication
 health. Request diagnostic details when investigating its results.
 
+Directory health, the domain controller table, and disk capacity cover every
+domain controller in the forest, labeled by domain. The selected domain's DCs
+are listed through the selected server; other forest domains are located by DNS
+name. If another domain's DCs cannot be listed, the report records a collection
+warning and continues; failure to list the selected domain's DCs stops the
+report. The user count, functional levels, and FSMO details remain specific to
+the selected domain.
+
 User counting exclusively streams `Get-ADUser` results through `Measure-Object`,
 using the selected controller and a subtree search under the selected domain's
 distinguished name, without a result-count limit. The script no longer uses
