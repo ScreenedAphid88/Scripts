@@ -9,13 +9,17 @@ authenticated WSMan CIM sessions; configure remote access without disabling
 authentication or certificate validation. Collection runs in isolated,
 throttled jobs with configurable deadlines.
 .EXAMPLE
-& ".\Active Directory - HTML Overview Report.ps1" -DiagnosticsLevel Quick -OpenReport
+& ".\Active Directory - HTML Overview Report.ps1" -OpenReport
+.EXAMPLE
+& ".\Active Directory - HTML Overview Report.ps1" -DiagnosticsLevel Full `
+    -DiagnosticsTimeoutSeconds 1800
 .EXAMPLE
 & ".\Active Directory - HTML Overview Report.ps1" -Server DC01.contoso.com `
     -RedactSensitiveData -ProtectOutput -DiagnosticsLevel None -Verbose
 .NOTES
-Full diagnostics preserve the original enterprise-wide scope. Quick diagnostics
-target the selected domain controller. Raw diagnostic/error details and creator
+Quick diagnostics are the default and target the selected domain controller.
+Full diagnostics are opt-in, enterprise-wide, and may need a longer
+DiagnosticsTimeoutSeconds. Raw diagnostic/error details and creator
 identity are opt-in. Redaction is best-effort, not a substitute for reviewing
 the report before sharing it. Existing reports require -Force to overwrite.
 #>
@@ -36,7 +40,7 @@ param(
     [ValidateRange(5, 7200)]
     [int]$DiagnosticsTimeoutSeconds = 300,
     [ValidateSet("None", "Quick", "Full")]
-    [string]$DiagnosticsLevel = "Full",
+    [string]$DiagnosticsLevel = "Quick",
     [switch]$RedactSensitiveData,
     [switch]$IncludeDiagnosticDetails,
     [switch]$IncludeCreatorIdentity,

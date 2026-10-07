@@ -268,6 +268,11 @@ try {
     Assert-Report ($localized -match "Echec de replication" -and $localized -match "Review output") "Non-English DCDIAG output is retained and requires review."
     Assert-Report ($localized -match 'style="width: 9.9%') "Decimal-comma cultures do not produce invalid chart widths."
     $env:AD_REPORT_TEST_SCENARIO = "Healthy"
+    $diagnosticsParameter = $ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq "DiagnosticsLevel" }
+    Assert-Report ($diagnosticsParameter.DefaultValue.Value -eq "Quick") "Diagnostics default to the selected-controller Quick level."
+    $defaultPath = Join-Path $testDirectory "default.html"
+    & $mockReport -OutputPath $defaultPath | Out-Null
+    Assert-Report ((Get-Content -LiteralPath $defaultPath -Raw) -match "Diagnostics scope: Quick") "Reports without DiagnosticsLevel run Quick diagnostics."
     & $mockReport -OutputPath (Join-Path $testDirectory "full.html") -DiagnosticsLevel Full | Out-Null
     Assert-Report ((Get-Content -LiteralPath (Join-Path $testDirectory "full.html") -Raw) -match "No reported errors") "Clean full diagnostics remain healthy without raw details."
     $env:AD_REPORT_TEST_SCENARIO = "NativeFailure"

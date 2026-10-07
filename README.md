@@ -10,13 +10,16 @@ Disk access may require additional permissions; do not disable authentication or
 certificate checks to make a failed query work.
 
 ```powershell
-# Original full enterprise-wide diagnostics, with interactive progress.
+# Default Quick diagnostics against the selected controller, with interactive progress.
 & ".\Active Directory - HTML Overview Report.ps1" -OpenReport
 
-# Faster diagnostics against one selected controller.
+# Quick diagnostics against a specific domain and controller.
 & ".\Active Directory - HTML Overview Report.ps1" `
-    -Domain contoso.com -Server DC01.contoso.com `
-    -DiagnosticsLevel Quick -ThrottleLimit 4 -Verbose
+    -Domain contoso.com -Server DC01.contoso.com -ThrottleLimit 4 -Verbose
+
+# Opt-in comprehensive enterprise-wide diagnostics, with a longer deadline.
+& ".\Active Directory - HTML Overview Report.ps1" `
+    -DiagnosticsLevel Full -DiagnosticsTimeoutSeconds 1800
 
 # A report prepared for review before sharing.
 & ".\Active Directory - HTML Overview Report.ps1" `
@@ -26,7 +29,7 @@ certificate checks to make a failed query work.
 
 | Option | Default | Behavior |
 |---|---|---|
-| `DiagnosticsLevel` | `Full` | `Full` runs enterprise-wide replication and comprehensive DCDIAG; `Quick` targets the selected DC with connectivity, advertising, and replication tests; `None` explicitly skips diagnostics. |
+| `DiagnosticsLevel` | `Quick` | `Quick` targets the selected DC with connectivity, advertising, and replication tests; `Full` opts in to enterprise-wide replication and comprehensive DCDIAG (`/e /q /c`), which tests every forest DC sequentially and may need a longer `DiagnosticsTimeoutSeconds`; `None` explicitly skips diagnostics. |
 | `ThrottleLimit` | `4` | Maximum simultaneous collection jobs, configurable from 1 to 16. Jobs are process-isolated for reliable cancellation and Windows PowerShell 5.1 compatibility. Startup overhead may outweigh parallelism gains for small environments. |
 | `OperationTimeoutSeconds` | `60` | Per-job wall-clock deadline, including startup; inventory is one job and user count and each DC health/disk check are separate jobs. Increase this for large or slow directories. |
 | `DiagnosticsTimeoutSeconds` | `300` | Deadline for each native diagnostic process. |
