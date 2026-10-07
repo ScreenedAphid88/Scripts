@@ -37,7 +37,7 @@ function Invoke-WorkerChecks {
     function Get-ADRootDSE {
         param($Properties, $Server, $ErrorAction)
         [pscustomobject]@{
-            currentTime = Get-Date; isGlobalCatalogReady = "False"; isSynchronized = "TRUE"
+            currentTime = Get-Date; isGlobalCatalogReady = $script:readyValue; isSynchronized = $script:synchronizedValue
             defaultNamingContext = "DC=fixture"
         }
     }
@@ -72,8 +72,38 @@ function Invoke-WorkerChecks {
         param($CimSession, $ErrorAction)
         $script:removedSessions++
     }
+    $script:readyValue = "False"
+    $script:synchronizedValue = "TRUE"
     $status = & $worker ([pscustomobject]@{ Kind = "Status"; Server = "fixture" }) 10
     Assert-Report (-not $status.Ready -and $status.Synchronized) "String booleans are parsed correctly."
+    $script:readyValue = [System.Collections.ObjectModel.Collection[object]]::new()
+    $script:readyValue.Add("FALSE")
+    $script:synchronizedValue = [System.Collections.ObjectModel.Collection[object]]::new()
+    $script:synchronizedValue.Add("TRUE")
+    $status = & $worker ([pscustomobject]@{ Kind = "Status"; Server = "fixture" }) 10
+    Assert-Report (-not $status.Ready -and $status.Synchronized) "Single-valued AD-style collections are unwrapped before Boolean conversion."
+    $script:readyValue = $true
+    $script:synchronizedValue = $false
+    $status = & $worker ([pscustomobject]@{ Kind = "Status"; Server = "fixture" }) 10
+    Assert-Report ($status.Ready -and -not $status.Synchronized) "Native booleans retain their values."
+    foreach ($invalidValue in @($null, @(), @("TRUE", "FALSE"), "not-a-boolean")) {
+        $script:readyValue = $invalidValue
+        $failed = $false
+        try { & $worker ([pscustomobject]@{ Kind = "Status"; Server = "fixture" }) 10 | Out-Null }
+        catch { $failed = $true }
+        Assert-Report $failed "Missing, multiple, and invalid RootDSE Boolean values fail explicitly."
+    }
+    $ldapTry = $assignment.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.TryStatementAst] -and $node.Body.Extent.Text -match '\$searcher.FindAll\(\)'
+    }, $true)
+    $cleanupText = $ldapTry.Finally.Extent.Text
+    $cleanup = [scriptblock]::Create($cleanupText.Substring(1, $cleanupText.Length - 2))
+    $entry = [System.DirectoryServices.DirectoryEntry]::new("InvalidProvider://fixture")
+    $searcher = [System.DirectoryServices.DirectorySearcher]::new($entry)
+    $results = $null
+    & $cleanup
+    Assert-Report $true "LDAP cleanup disposes unbound directory objects without invoking the directory-object adapter."
     $count = & $worker ([pscustomobject]@{ Kind = "Users"; Method = "AD"; Server = "fixture"; SearchBase = "DC=fixture" }) 10
     Assert-Report ($count -eq 7) "AD user count is streamed."
     $script:invalidDisk = $false

@@ -312,18 +312,27 @@ $collectionWorker = {
                     $results.Count
                 }
                 finally {
-                    if ($null -ne $results) { $results.Dispose() }
-                    if ($null -ne $searcher) { $searcher.Dispose() }
-                    if ($null -ne $entry) { $entry.Dispose() }
+                    # Bypass the directory-object adapter, which can bind to LDAP during member lookup.
+                    if ($null -ne $results) { $results.psbase.Dispose() }
+                    if ($null -ne $searcher) { $searcher.psbase.Dispose() }
+                    if ($null -ne $entry) { $entry.psbase.Dispose() }
                 }
             }
         }
         "Status" {
             $root = Get-ADRootDSE -Properties currentTime, isGlobalCatalogReady, isSynchronized -Server $Task.Server -ErrorAction Stop
+            $health = @{}
+            foreach ($property in @("isGlobalCatalogReady", "isSynchronized")) {
+                $values = @($root.$property)
+                if ($values.Count -ne 1 -or $null -eq $values[0]) {
+                    throw "RootDSE property $property must contain exactly one Boolean value."
+                }
+                $health[$property] = [System.Convert]::ToBoolean($values[0])
+            }
             [pscustomobject]@{
                 CurrentTime = $root.currentTime
-                Ready = [System.Convert]::ToBoolean($root.isGlobalCatalogReady)
-                Synchronized = [System.Convert]::ToBoolean($root.isSynchronized)
+                Ready = $health.isGlobalCatalogReady
+                Synchronized = $health.isSynchronized
             }
         }
         "Disks" {

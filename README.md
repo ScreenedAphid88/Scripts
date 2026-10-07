@@ -47,6 +47,19 @@ non-GC controllers are excluded from the GC-readiness denominator. Repadmin's
 exit code indicates command completion, not independently verified replication
 health. Request diagnostic details when investigating its results.
 
+RootDSE health flags are unwrapped from AD property collections before Boolean
+conversion. Missing, multi-valued, or invalid flags fail the health check rather
+than being treated as healthy. LDAP resources are disposed through `psbase`
+to avoid directory lookups during PowerShell member resolution.
+
+If DCDIAG reaches its deadline, use `-DiagnosticsLevel Quick` for the selected
+controller's connectivity, advertising, and replication tests, or increase
+`-DiagnosticsTimeoutSeconds` (for example, `900`) to retain full enterprise-wide
+coverage. The maximum is `7200` seconds. A timeout remains an unavailable check,
+not a healthy result. If LDAP user counting still reports an operations error,
+use `-UserCountMethod AD` and review the detailed warning; this explicitly selects
+the AD cmdlet path rather than silently falling back after an LDAP failure.
+
 Reports are first written to a temporary sibling file and then moved into place.
 Native tools are invoked from their Windows system location, not command lookup.
 Network output paths trigger a warning. There are no external report assets or
