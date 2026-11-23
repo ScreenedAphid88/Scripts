@@ -1,1 +1,155 @@
+# Gather basic hardware information for a Windows PC.
+# Run in PowerShell; administrator rights are not normally required.
+# This script only reads local system information and does not upload or transmit it.
 
+$ErrorActionPreference = 'Stop'
+
+function Format-Bytes {
+    param([Nullable[UInt64]] $Bytes)
+
+    if ($null -eq $Bytes) { return 'Unknown' }
+    $value = [double]$Bytes
+    foreach ($unit in @('B', 'KB', 'MB', 'GB', 'TB', 'PB')) {
+        if ($value -lt 1024 -or $unit -eq 'PB') {
+            if ($unit -eq 'B') { return ('{0:N0} {1}' -f $value, $unit) }
+            return ('{0:N2} {1}' -f $value, $unit)
+        }
+        $value /= 1024
+    }
+}
+
+function Get-MemoryTypeName {
+    param([int] $Code)
+
+    $types = @{
+        0 = 'Unknown'; 1 = 'Other'; 2 = 'DRAM'; 3 = 'Synchronous DRAM';
+        4 = 'Cache DRAM'; 5 = 'EDO'; 6 = 'EDRAM'; 7 = 'VRAM'; 8 = 'SRAM';
+        9 = 'RAM'; 10 = 'ROM'; 11 = 'Flash'; 12 = 'EEPROM'; 13 = 'FEPROM';
+        14 = 'EPROM'; 15 = 'CDRAM'; 16 = '3DRAM'; 17 = 'SDRAM'; 18 = 'SGRAM';
+        19 = 'RDRAM'; 20 = 'DDR'; 21 = 'DDR2'; 22 = 'DDR2 FB-DIMM';
+        24 = 'DDR3'; 25 = 'FBD2'; 26 = 'DDR4'; 27 = 'LPDDR';
+        28 = 'LPDDR2'; 29 = 'LPDDR3'; 30 = 'LPDDR4';  = 'Logical NVDIMM';
+        34 = 'HBM'; 35 = 'HBM2'; 36 = 'DDR5'; 37 = 'LPDDR5'
+    }
+
+    if ($types.ContainsKey($Code) -and $Code -ne 0) { return $types[$Code] }
+    return 'Unknown'
+}
+
+function Get-FirstUsableValue {
+    param([object[]] $Values)
+
+    foreach ($value in $Values) {
+        if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+            return ([string]$value).Trim()
+        }
+    }
+    return 'Unknown'
+}
+
+try {
+    $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem
+    $processors = @(Get-CimInstance -ClassName Win32_Processor)
+    $memoryModules = @(Get-CimInstance -ClassName Win32_PhysicalMemory)
+    $memoryArrays = @(Get-CimInstance -ClassName Win32_PhysicalMemoryArray)
+    $baseBoards = @(Get-CimInstance -ClassName Win32_BaseBoard)
+    $bios = Get-CimInstance -ClassName Win32_BIOS
+    $physicalDisks = @(Get-CimInstance -ClassName Win32_DiskDrive)
+    $logicalDisks = @(Get-CimInstance -ClassName Win32_LogicalDisk -Filter 'DriveType=3')
+
+    Write-Output 'COMPUTER INFORMATION'
+    Write-Output ('Computer name: {0}' -f $computerSystem.Name)
+    Write-Output ('Operating system: {0}' -f (Get-CimInstance -ClassName Win32_OperatingSystem).Caption)
+
+    Write-Output "`nCPU"
+    if ($processors.Count -eq 0) {
+        Write-Output 'No processor information was reported.'
+    } else {
+        foreach ($cpu in $processors) {
+            $speed = if ($cpu.MaxClockSpeed) { '{0:N0} MHz' -f $cpu.MaxClockSpeed } else { 'Unknown' }
+            Write-Output ('Make: {0}' -f (Get-FirstUsableValue @($cpu.Manufacturer)))
+            Write-Output ('Model: {0}' -f (Get-FirstUsableValue @($cpu.Name)))
+            Write-Output ('Maximum speed: {0}' -f $speed)
+        }
+    }
+
+    $installedMemoryBytes = [UInt64]0
+    foreach ($module in $memoryModules) {
+        if ($module.Capacity) { $installedMemoryBytes += [UInt64]$module.Capacity }
+    }
+    $maximumMemoryBytes = [UInt64]0
+    foreach ($array in $memoryArrays) {
+        if ($array.MaxCapacityEx) {
+            $maximumMemoryBytes += [UInt64]$array.MaxCapacityEx
+        } elseif ($array.MaxCapacity) {
+            # Win32_PhysicalMemoryArray.MaxCapacity is expressed in kilobytes.
+            $maximumMemoryBytes += ([UInt64]$array.MaxCapacity * 1KB)
+        }
+    }
+
+    Write-Output "`nMEMORY"
+    Write-Output ('Installed: {0}' -f (Format-Bytes $installedMemoryBytes))
+    Write-Output ('Maximum supported (reported by firmware): {0}' -f (Format-Bytes $maximumMemoryBytes))
+    if ($memoryModules.Count -eq 0) {
+        Write-Output 'No memory module information was reported.'
+    } else {
+        foreach ($module in $memoryModules) {
+            $memoryType = Get-MemoryTypeName -Code ([int]$module.SMBIOSMemoryType)
+            if ($memoryType -eq 'Unknown' -and $module.MemoryType) {
+                $memoryType = Get-MemoryTypeName -Code ([int]$module.MemoryType)
+            }
+            $speed = if ($module.ConfiguredClockSpeed) { $module.ConfiguredClockSpeed } else { $module.Speed }
+            $speedText = if ($speed) { '{0} MHz' -f $speed } else { 'Unknown' }
+            Write-Output ('Module: {0}; Type: {1}; Speed: {2}' -f (Format-Bytes ([UInt64]$module.Capacity)), $memoryType, $speedText)
+        }
+    }
+
+    Write-Output "`nSTORAGE"
+    Write-Output 'Physical drives:'
+    if ($physicalDisks.Count -eq 0) {
+        Write-Output '  No physical drive information was reported.'
+    } else {
+        foreach ($disk in $physicalDisks) {
+            $manufacturer = Get-FirstUsableValue @($disk.Manufacturer)
+            $model = Get-FirstUsableValue @($disk.Model)
+            $size = if ($disk.Size) { Format-Bytes ([UInt64]$disk.Size) } else { 'Unknown' }
+            Write-Output ('  Disk {0}: {1} {2}; device-reported size: {3}' -f $disk.Index, $manufacturer, $model, $size)
+        }
+    }
+
+    Write-Output 'Local drive space:'
+    if ($logicalDisks.Count -eq 0) {
+        Write-Output '  No local drive information was reported.'
+    } else {
+        foreach ($disk in $logicalDisks) {
+            $size = if ($null -ne $disk.Size) { [UInt64]$disk.Size } else { [UInt64]0 }
+            $free = if ($null -ne $disk.FreeSpace) { [UInt64]$disk.FreeSpace } else { [UInt64]0 }
+            $used = if ($size -ge $free) { $size - $free } else { [UInt64]0 }
+            Write-Output ('  {0} ({1}): total {2}; used {3}; free {4}' -f $disk.DeviceID, $disk.VolumeName, (Format-Bytes $size), (Format-Bytes $used), (Format-Bytes $free))
+        }
+    }
+
+    Write-Output "`nMOTHERBOARD"
+    if ($baseBoards.Count -eq 0) {
+        Write-Output 'Make: Unknown'
+        Write-Output 'Model: Unknown'
+    } else {
+        foreach ($board in $baseBoards) {
+            Write-Output ('Make: {0}' -f (Get-FirstUsableValue @($board.Manufacturer)))
+            Write-Output ('Model: {0}' -f (Get-FirstUsableValue @($board.Product)))
+        }
+    }
+
+    Write-Output "`nBIOS"
+    Write-Output ('Version: {0}' -f (Get-FirstUsableValue @($bios.SMBIOSBIOSVersion, $bios.Version)))
+    if ($bios.ReleaseDate) {
+        try {
+            Write-Output ('Release date: {0}' -f ([Management.ManagementDateTimeConverter]::ToDateTime($bios.ReleaseDate).ToString('yyyy-MM-dd')))
+        } catch {
+            Write-Output ('Release date: {0}' -f $bios.ReleaseDate)
+        }
+    }
+} catch {
+    Write-Error ('Unable to gather all computer information: {0}' -f $_.Exception.Message)
+    exit 1
+}
