@@ -47,8 +47,42 @@ function Get-FirstUsableValue {
     return 'Unknown'
 }
 
+function Write-Section {
+    param([Parameter(Mandatory)][string] $Title)
+
+    Write-Host "" 
+    Write-Host ('=' * 70) -ForegroundColor DarkCyan
+    Write-Host ("  $Title") -ForegroundColor Cyan
+    Write-Host ('=' * 70) -ForegroundColor DarkCyan
+}
+
+function Write-Field {
+    param(
+        [Parameter(Mandatory)][string] $Label,
+        [AllowNull()][AllowEmptyString()][object] $Value
+    )
+
+    $displayValue = if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+        'Unknown'
+    } else {
+        [string]$Value
+    }
+
+    Write-Host ('{0,-24}' -f ($Label + ':')) -ForegroundColor DarkGray -NoNewline
+    Write-Host $displayValue
+}
+
+function Write-Subsection {
+    param([Parameter(Mandatory)][string] $Title)
+
+    Write-Host ""
+    Write-Host $Title -ForegroundColor Yellow
+    Write-Host ('-' * $Title.Length) -ForegroundColor DarkGray
+}
+
 try {
     $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem
+    $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
     $processors = @(Get-CimInstance -ClassName Win32_Processor)
     $memoryModules = @(Get-CimInstance -ClassName Win32_PhysicalMemory)
     $memoryArrays = @(Get-CimInstance -ClassName Win32_PhysicalMemoryArray)
@@ -57,19 +91,22 @@ try {
     $physicalDisks = @(Get-CimInstance -ClassName Win32_DiskDrive)
     $logicalDisks = @(Get-CimInstance -ClassName Win32_LogicalDisk -Filter 'DriveType=3')
 
-    Write-Output 'COMPUTER INFORMATION'
-    Write-Output ('Computer name: {0}' -f $computerSystem.Name)
-    Write-Output ('Operating system: {0}' -f (Get-CimInstance -ClassName Win32_OperatingSystem).Caption)
+    Write-Section 'COMPUTER INFORMATION'
+    Write-Field 'Computer name' $computerSystem.Name
+    Write-Field 'Operating system' $operatingSystem.Caption
 
-    Write-Output "`nCPU"
+    Write-Section 'CPU'
     if ($processors.Count -eq 0) {
-        Write-Output 'No processor information was reported.'
+        Write-Host '  No processor information was reported.' -ForegroundColor DarkYellow
     } else {
+        $cpuNumber = 1
         foreach ($cpu in $processors) {
+            if ($processors.Count -gt 1) { Write-Subsection ('Processor ' + $cpuNumber) }
             $speed = if ($cpu.MaxClockSpeed) { '{0:N0} MHz' -f $cpu.MaxClockSpeed } else { 'Unknown' }
-            Write-Output ('Make: {0}' -f (Get-FirstUsableValue @($cpu.Manufacturer)))
-            Write-Output ('Model: {0}' -f (Get-FirstUsableValue @($cpu.Name)))
-            Write-Output ('Maximum speed: {0}' -f $speed)
+            Write-Field 'Make' (Get-FirstUsableValue @($cpu.Manufacturer))
+            Write-Field 'Model' (Get-FirstUsableValue @($cpu.Name))
+            Write-Field 'Maximum speed' $speed
+            $cpuNumber++
         }
     }
 
@@ -82,74 +119,91 @@ try {
         if ($array.MaxCapacityEx) {
             $maximumMemoryBytes += [UInt64]$array.MaxCapacityEx
         } elseif ($array.MaxCapacity) {
-            # Win32_PhysicalMemoryArray.MaxCapacity is expressed in kilobytes.
             $maximumMemoryBytes += ([UInt64]$array.MaxCapacity * 1KB)
         }
     }
 
-    Write-Output "`nMEMORY"
-    Write-Output ('Installed: {0}' -f (Format-Bytes $installedMemoryBytes))
-    Write-Output ('Maximum supported (reported by firmware): {0}' -f (Format-Bytes $maximumMemoryBytes))
+    Write-Section 'MEMORY'
+    Write-Field 'Installed memory' (Format-Bytes $installedMemoryBytes)
+    Write-Field 'Maximum supported' (Format-Bytes $maximumMemoryBytes)
     if ($memoryModules.Count -eq 0) {
-        Write-Output 'No memory module information was reported.'
+        Write-Host '  No memory module information was reported.' -ForegroundColor DarkYellow
     } else {
+        $moduleNumber = 1
         foreach ($module in $memoryModules) {
+            if ($memoryModules.Count -gt 1) { Write-Subsection ('Memory module ' + $moduleNumber) }
             $memoryType = Get-MemoryTypeName -Code ([int]$module.SMBIOSMemoryType)
             if ($memoryType -eq 'Unknown' -and $module.MemoryType) {
                 $memoryType = Get-MemoryTypeName -Code ([int]$module.MemoryType)
             }
             $speed = if ($module.ConfiguredClockSpeed) { $module.ConfiguredClockSpeed } else { $module.Speed }
             $speedText = if ($speed) { '{0} MHz' -f $speed } else { 'Unknown' }
-            Write-Output ('Module: {0}; Type: {1}; Speed: {2}' -f (Format-Bytes ([UInt64]$module.Capacity)), $memoryType, $speedText)
+            Write-Field 'Capacity' (Format-Bytes ([UInt64]$module.Capacity))
+            Write-Field 'Type' $memoryType
+            Write-Field 'Speed' $speedText
+            $moduleNumber++
         }
     }
 
-    Write-Output "`nSTORAGE"
-    Write-Output 'Physical drives:'
+    Write-Section 'STORAGE'
+    Write-Subsection 'Physical drives'
     if ($physicalDisks.Count -eq 0) {
-        Write-Output '  No physical drive information was reported.'
+        Write-Host '  No physical drive information was reported.' -ForegroundColor DarkYellow
     } else {
         foreach ($disk in $physicalDisks) {
-            $manufacturer = Get-FirstUsableValue @($disk.Manufacturer)
-            $model = Get-FirstUsableValue @($disk.Model)
             $size = if ($disk.Size) { Format-Bytes ([UInt64]$disk.Size) } else { 'Unknown' }
-            Write-Output ('  Disk {0}: {1} {2}; device-reported size: {3}' -f $disk.Index, $manufacturer, $model, $size)
+            Write-Host ""
+            Write-Host ('  Disk ' + $disk.Index) -ForegroundColor Green
+            Write-Field 'Manufacturer' (Get-FirstUsableValue @($disk.Manufacturer))
+            Write-Field 'Model' (Get-FirstUsableValue @($disk.Model))
+            Write-Field 'Device-reported size' $size
         }
     }
 
-    Write-Output 'Local drive space:'
+    Write-Subsection 'Local drive space'
     if ($logicalDisks.Count -eq 0) {
-        Write-Output '  No local drive information was reported.'
+        Write-Host '  No local drive information was reported.' -ForegroundColor DarkYellow
     } else {
         foreach ($disk in $logicalDisks) {
             $size = if ($null -ne $disk.Size) { [UInt64]$disk.Size } else { [UInt64]0 }
             $free = if ($null -ne $disk.FreeSpace) { [UInt64]$disk.FreeSpace } else { [UInt64]0 }
             $used = if ($size -ge $free) { $size - $free } else { [UInt64]0 }
-            Write-Output ('  {0} ({1}): total {2}; used {3}; free {4}' -f $disk.DeviceID, $disk.VolumeName, (Format-Bytes $size), (Format-Bytes $used), (Format-Bytes $free))
+            $volumeName = Get-FirstUsableValue @($disk.VolumeName)
+
+            Write-Host ""
+            Write-Host ('  ' + $disk.DeviceID + '  ' + $volumeName) -ForegroundColor Green
+            Write-Field 'Total' (Format-Bytes $size)
+            Write-Field 'Used' (Format-Bytes $used)
+            Write-Field 'Free' (Format-Bytes $free)
         }
     }
 
-    Write-Output "`nMOTHERBOARD"
+    Write-Section 'MOTHERBOARD'
     if ($baseBoards.Count -eq 0) {
-        Write-Output 'Make: Unknown'
-        Write-Output 'Model: Unknown'
+        Write-Field 'Make' 'Unknown'
+        Write-Field 'Model' 'Unknown'
     } else {
         foreach ($board in $baseBoards) {
-            Write-Output ('Make: {0}' -f (Get-FirstUsableValue @($board.Manufacturer)))
-            Write-Output ('Model: {0}' -f (Get-FirstUsableValue @($board.Product)))
+            Write-Field 'Make' (Get-FirstUsableValue @($board.Manufacturer))
+            Write-Field 'Model' (Get-FirstUsableValue @($board.Product))
         }
     }
 
-    Write-Output "`nBIOS"
-    Write-Output ('Version: {0}' -f (Get-FirstUsableValue @($bios.SMBIOSBIOSVersion, $bios.Version)))
+    Write-Section 'BIOS'
+    Write-Field 'Version' (Get-FirstUsableValue @($bios.SMBIOSBIOSVersion, $bios.Version))
     if ($bios.ReleaseDate) {
         try {
-            Write-Output ('Release date: {0}' -f ([Management.ManagementDateTimeConverter]::ToDateTime($bios.ReleaseDate).ToString('yyyy-MM-dd')))
+            $releaseDate = ([Management.ManagementDateTimeConverter]::ToDateTime($bios.ReleaseDate).ToString('yyyy-MM-dd'))
+            Write-Field 'Release date' $releaseDate
         } catch {
-            Write-Output ('Release date: {0}' -f $bios.ReleaseDate)
+            Write-Field 'Release date' ([string]$bios.ReleaseDate)
         }
     }
+
+    Write-Host ""
+    Write-Host ('=' * 70) -ForegroundColor DarkCyan
 } catch {
-    Write-Error ('Unable to gather all computer information: {0}' -f $_.Exception.Message)
+    Write-Host ''
+    Write-Host ('Unable to gather all computer information: ' + $_.Exception.Message) -ForegroundColor Red
     exit 1
 }
