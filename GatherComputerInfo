@@ -28,7 +28,7 @@ function Get-MemoryTypeName {
         14 = 'EPROM'; 15 = 'CDRAM'; 16 = '3DRAM'; 17 = 'SDRAM'; 18 = 'SGRAM';
         19 = 'RDRAM'; 20 = 'DDR'; 21 = 'DDR2'; 22 = 'DDR2 FB-DIMM';
         24 = 'DDR3'; 25 = 'FBD2'; 26 = 'DDR4'; 27 = 'LPDDR';
-        28 = 'LPDDR2'; 29 = 'LPDDR3'; 30 = 'LPDDR4';  = 'Logical NVDIMM';
+        28 = 'LPDDR2'; 29 = 'LPDDR3'; 30 = 'LPDDR4'; 33 = 'Logical NVDIMM';
         34 = 'HBM'; 35 = 'HBM2'; 36 = 'DDR5'; 37 = 'LPDDR5'
     }
 
